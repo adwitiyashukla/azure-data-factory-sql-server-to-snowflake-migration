@@ -21,7 +21,7 @@
       }
     },
     "connectVia": {
-      "referenceName": "ir_onprem",
+      "referenceName": "ir-onprem",
       "type": "IntegrationRuntimeReference"
     }
   }

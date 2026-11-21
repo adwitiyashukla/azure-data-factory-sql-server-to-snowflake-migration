@@ -1,5 +1,5 @@
 {
-  "name": "ir_onprem",
+  "name": "ir-onprem",
   "properties": {
     "type": "SelfHosted",
     "typeProperties": {}

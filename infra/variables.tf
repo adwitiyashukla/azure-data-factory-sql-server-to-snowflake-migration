@@ -8,6 +8,11 @@ variable "location" {
   default = "westus2"
 }
 
+variable "control_location" {
+  type    = string
+  default = "canadacentral"
+}
+
 variable "github_owner" {
   type    = string
   default = "adwitiyashukla"

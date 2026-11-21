@@ -119,7 +119,7 @@ resource "azurerm_key_vault_secret" "snowflake_private_key" {
 resource "azurerm_mssql_server" "control" {
   name                          = "sql-${local.name}"
   resource_group_name           = data.azurerm_resource_group.main.name
-  location                      = data.azurerm_resource_group.main.location
+  location                      = var.control_location
   version                       = "12.0"
   minimum_tls_version           = "1.2"
   public_network_access_enabled = true
