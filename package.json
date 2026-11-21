@@ -1,0 +1,10 @@
+{
+  "name": "azure-data-factory-sql-server-to-snowflake-migration",
+  "private": true,
+  "scripts": {
+    "build": "node node_modules/@microsoft/azure-data-factory-utilities/lib/index"
+  },
+  "dependencies": {
+    "@microsoft/azure-data-factory-utilities": "1.0.3"
+  }
+}

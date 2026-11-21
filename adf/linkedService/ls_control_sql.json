@@ -1,0 +1,15 @@
+{
+  "name": "ls_control_sql",
+  "properties": {
+    "annotations": [],
+    "type": "AzureSqlDatabase",
+    "version": "2.0",
+    "typeProperties": {
+      "server": "sql-adfmig-as.database.windows.net",
+      "database": "control",
+      "encrypt": "mandatory",
+      "trustServerCertificate": false,
+      "authenticationType": "SystemAssignedManagedIdentity"
+    }
+  }
+}

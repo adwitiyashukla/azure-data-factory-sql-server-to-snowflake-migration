@@ -1,0 +1,74 @@
+name: adf
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - adf/**
+      - package.json
+      - .github/workflows/adf.yml
+  pull_request:
+    paths:
+      - adf/**
+      - package.json
+      - .github/workflows/adf.yml
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: deploy the exported template to the factory
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-adfmig-as
+  FACTORY_NAME: adf-adfmig-as
+  FACTORY_ID: /subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/rg-adfmig-as/providers/Microsoft.DataFactory/factories/adf-adfmig-as
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - run: npm run build validate ${{ github.workspace }}/adf ${{ env.FACTORY_ID }}
+      - run: npm run build export ${{ github.workspace }}/adf ${{ env.FACTORY_ID }} armtemplate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: armtemplate
+          path: armtemplate
+
+  deploy:
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: armtemplate
+          path: armtemplate
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: az config set extension.use_dynamic_install=yes_without_prompt
+      - run: |
+          for f in adf/trigger/*.json; do
+            az datafactory trigger stop --resource-group $RESOURCE_GROUP --factory-name $FACTORY_NAME --name "$(jq -r .name "$f")" || true
+          done
+      - run: az deployment group create --resource-group $RESOURCE_GROUP --template-file armtemplate/ARMTemplateForFactory.json --parameters armtemplate/ARMTemplateParametersForFactory.json --parameters factoryName=$FACTORY_NAME
+      - run: |
+          for f in adf/trigger/*.json; do
+            if [ "$(jq -r .properties.runtimeState "$f")" = "Started" ]; then
+              az datafactory trigger start --resource-group $RESOURCE_GROUP --factory-name $FACTORY_NAME --name "$(jq -r .name "$f")"
+            fi
+          done

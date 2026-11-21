@@ -1,0 +1,24 @@
+{
+  "name": "ls_snowflake",
+  "properties": {
+    "annotations": [],
+    "type": "SnowflakeV2",
+    "version": "1.1",
+    "typeProperties": {
+      "authenticationType": "KeyPair",
+      "accountIdentifier": "IGEJFKJ-AK73574",
+      "user": "ADF_SVC",
+      "database": "ADFMIG",
+      "warehouse": "ADFMIG_WH",
+      "role": "ADFMIG_LOADER",
+      "privateKey": {
+        "type": "AzureKeyVaultSecret",
+        "store": {
+          "referenceName": "ls_keyvault",
+          "type": "LinkedServiceReference"
+        },
+        "secretName": "snowflake-private-key"
+      }
+    }
+  }
+}

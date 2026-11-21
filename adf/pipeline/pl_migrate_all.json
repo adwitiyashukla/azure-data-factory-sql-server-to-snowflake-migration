@@ -1,0 +1,115 @@
+{
+  "name": "pl_migrate_all",
+  "properties": {
+    "activities": [
+      {
+        "name": "lk_tables",
+        "type": "Lookup",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT id, schema_name, table_name, key_column, watermark_column, target_table, parallel_copies, CONVERT(VARCHAR(23), watermark_value, 126) AS watermark_value FROM meta.source_table WHERE enabled = 1 ORDER BY id",
+            "queryTimeout": "02:00:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "ds_control_table",
+            "type": "DatasetReference"
+          },
+          "firstRowOnly": false
+        }
+      },
+      {
+        "name": "fe_tables",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "lk_tables",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "userProperties": [],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('lk_tables').output.value",
+            "type": "Expression"
+          },
+          "isSequential": false,
+          "batchCount": 3,
+          "activities": [
+            {
+              "name": "ep_copy_table",
+              "type": "ExecutePipeline",
+              "dependsOn": [],
+              "policy": {
+                "secureInput": false
+              },
+              "userProperties": [],
+              "typeProperties": {
+                "pipeline": {
+                  "referenceName": "pl_copy_table",
+                  "type": "PipelineReference"
+                },
+                "waitOnCompletion": true,
+                "parameters": {
+                  "control_id": {
+                    "value": "@item().id",
+                    "type": "Expression"
+                  },
+                  "schema_name": {
+                    "value": "@item().schema_name",
+                    "type": "Expression"
+                  },
+                  "table_name": {
+                    "value": "@item().table_name",
+                    "type": "Expression"
+                  },
+                  "key_column": {
+                    "value": "@item().key_column",
+                    "type": "Expression"
+                  },
+                  "watermark_column": {
+                    "value": "@item().watermark_column",
+                    "type": "Expression"
+                  },
+                  "target_table": {
+                    "value": "@item().target_table",
+                    "type": "Expression"
+                  },
+                  "parallel_copies": {
+                    "value": "@item().parallel_copies",
+                    "type": "Expression"
+                  },
+                  "watermark_value": {
+                    "value": "@item().watermark_value",
+                    "type": "Expression"
+                  },
+                  "load_date": {
+                    "value": "@formatDateTime(pipeline().TriggerTime, 'yyyy-MM-dd')",
+                    "type": "Expression"
+                  },
+                  "batch_id": {
+                    "value": "@pipeline().RunId",
+                    "type": "Expression"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "annotations": []
+  }
+}

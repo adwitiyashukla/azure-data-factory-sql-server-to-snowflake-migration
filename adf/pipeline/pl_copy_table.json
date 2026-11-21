@@ -1,0 +1,368 @@
+{
+  "name": "pl_copy_table",
+  "properties": {
+    "activities": [
+      {
+        "name": "set_folder",
+        "type": "SetVariable",
+        "dependsOn": [],
+        "policy": {
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "variableName": "folder_path",
+          "value": {
+            "value": "@concat('raw/', pipeline().parameters.schema_name, '/', pipeline().parameters.table_name, '/load_date=', pipeline().parameters.load_date, '/run_id=', pipeline().RunId)",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "lk_new_watermark",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "set_folder",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:30:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 30,
+          "secureOutput": false,
+          "secureInput": false
+        },
+        "userProperties": [],
+        "typeProperties": {
+          "source": {
+            "type": "SqlSource",
+            "sqlReaderQuery": {
+              "value": "@concat('SELECT CONVERT(VARCHAR(23), ISNULL(MAX([', pipeline().parameters.watermark_column, ']), ''1900-01-01''), 126) AS new_watermark FROM [', pipeline().parameters.schema_name, '].[', pipeline().parameters.table_name, ']')",
+              "type": "Expression"
+            },
+            "queryTimeout": "00:30:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "ds_onprem_table",
+            "type": "DatasetReference",
+            "parameters": {
+              "schema_name": {
+                "value": "@pipeline().parameters.schema_name",
+                "type": "Expression"
+              },
+              "table_name": {
+                "value": "@pipeline().parameters.table_name",
+                "type": "Expression"
+              }
+            }
+          },
+          "firstRowOnly": true
+        }
+      },
+      {
+        "name": "if_new_rows",
+        "type": "IfCondition",
+        "dependsOn": [
+          {
+            "activity": "lk_new_watermark",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "userProperties": [],
+        "typeProperties": {
+          "expression": {
+            "value": "@greater(ticks(activity('lk_new_watermark').output.firstRow.new_watermark), ticks(pipeline().parameters.watermark_value))",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "name": "cp_to_lake",
+              "type": "Copy",
+              "dependsOn": [],
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "userProperties": [],
+              "typeProperties": {
+                "source": {
+                  "type": "SqlSource",
+                  "sqlReaderQuery": {
+                    "value": "@concat('SELECT * FROM [', pipeline().parameters.schema_name, '].[', pipeline().parameters.table_name, '] WHERE ?DfDynamicRangePartitionCondition AND [', pipeline().parameters.watermark_column, '] > ''', pipeline().parameters.watermark_value, ''' AND [', pipeline().parameters.watermark_column, '] <= ''', activity('lk_new_watermark').output.firstRow.new_watermark, '''')",
+                    "type": "Expression"
+                  },
+                  "queryTimeout": "02:00:00",
+                  "partitionOption": "DynamicRange",
+                  "partitionSettings": {
+                    "partitionColumnName": {
+                      "value": "@pipeline().parameters.key_column",
+                      "type": "Expression"
+                    }
+                  }
+                },
+                "sink": {
+                  "type": "ParquetSink",
+                  "storeSettings": {
+                    "type": "AzureBlobFSWriteSettings"
+                  },
+                  "formatSettings": {
+                    "type": "ParquetWriteSettings"
+                  }
+                },
+                "enableStaging": false,
+                "parallelCopies": {
+                  "value": "@pipeline().parameters.parallel_copies",
+                  "type": "Expression"
+                }
+              },
+              "inputs": [
+                {
+                  "referenceName": "ds_onprem_table",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "schema_name": {
+                      "value": "@pipeline().parameters.schema_name",
+                      "type": "Expression"
+                    },
+                    "table_name": {
+                      "value": "@pipeline().parameters.table_name",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "ds_lake_parquet",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "folder_path": {
+                      "value": "@variables('folder_path')",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "sc_load_snowflake",
+              "type": "Script",
+              "dependsOn": [
+                {
+                  "activity": "cp_to_lake",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ],
+              "policy": {
+                "timeout": "0.02:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "userProperties": [],
+              "linkedServiceName": {
+                "referenceName": "ls_snowflake",
+                "type": "LinkedServiceReference"
+              },
+              "typeProperties": {
+                "scripts": [
+                  {
+                    "type": "NonQuery",
+                    "text": {
+                      "value": "@concat('TRUNCATE TABLE STG.', pipeline().parameters.target_table)",
+                      "type": "Expression"
+                    }
+                  },
+                  {
+                    "type": "Query",
+                    "text": {
+                      "value": "@concat('COPY INTO STG.', pipeline().parameters.target_table, ' FROM @CORE.LAKE_STAGE/', variables('folder_path'), '/ FILE_FORMAT = (FORMAT_NAME = CORE.PARQUET_FF) MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE')",
+                      "type": "Expression"
+                    }
+                  },
+                  {
+                    "type": "Query",
+                    "text": {
+                      "value": "@concat('CALL CORE.MERGE_FROM_STG(''', pipeline().parameters.target_table, ''', ''', toUpper(pipeline().parameters.key_column), ''')')",
+                      "type": "Expression"
+                    }
+                  }
+                ],
+                "scriptBlockExecutionTimeout": "02:00:00"
+              }
+            },
+            {
+              "name": "sp_finish_load",
+              "type": "SqlServerStoredProcedure",
+              "dependsOn": [
+                {
+                  "activity": "sc_load_snowflake",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ],
+              "policy": {
+                "timeout": "0.00:10:00",
+                "retry": 1,
+                "retryIntervalInSeconds": 30,
+                "secureOutput": false,
+                "secureInput": false
+              },
+              "userProperties": [],
+              "linkedServiceName": {
+                "referenceName": "ls_control_sql",
+                "type": "LinkedServiceReference"
+              },
+              "typeProperties": {
+                "storedProcedureName": "[meta].[usp_finish_load]",
+                "storedProcedureParameters": {
+                  "control_id": {
+                    "value": {
+                      "value": "@pipeline().parameters.control_id",
+                      "type": "Expression"
+                    },
+                    "type": "Int32"
+                  },
+                  "run_id": {
+                    "value": {
+                      "value": "@pipeline().RunId",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "batch_id": {
+                    "value": {
+                      "value": "@pipeline().parameters.batch_id",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "watermark_from": {
+                    "value": {
+                      "value": "@pipeline().parameters.watermark_value",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "watermark_to": {
+                    "value": {
+                      "value": "@activity('lk_new_watermark').output.firstRow.new_watermark",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "rows_read": {
+                    "value": {
+                      "value": "@activity('cp_to_lake').output.rowsRead",
+                      "type": "Expression"
+                    },
+                    "type": "Int64"
+                  },
+                  "rows_copied": {
+                    "value": {
+                      "value": "@activity('cp_to_lake').output.rowsCopied",
+                      "type": "Expression"
+                    },
+                    "type": "Int64"
+                  },
+                  "bytes_read": {
+                    "value": {
+                      "value": "@activity('cp_to_lake').output.dataRead",
+                      "type": "Expression"
+                    },
+                    "type": "Int64"
+                  },
+                  "copy_seconds": {
+                    "value": {
+                      "value": "@activity('cp_to_lake').output.copyDuration",
+                      "type": "Expression"
+                    },
+                    "type": "Int32"
+                  },
+                  "throughput_kbps": {
+                    "value": {
+                      "value": "@activity('cp_to_lake').output.throughput",
+                      "type": "Expression"
+                    },
+                    "type": "Double"
+                  },
+                  "parallel_copies": {
+                    "value": {
+                      "value": "@activity('cp_to_lake').output.usedParallelCopies",
+                      "type": "Expression"
+                    },
+                    "type": "Int32"
+                  },
+                  "folder_path": {
+                    "value": {
+                      "value": "@variables('folder_path')",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  }
+                }
+              }
+            }
+          ],
+          "ifFalseActivities": []
+        }
+      }
+    ],
+    "parameters": {
+      "control_id": {
+        "type": "int"
+      },
+      "schema_name": {
+        "type": "string"
+      },
+      "table_name": {
+        "type": "string"
+      },
+      "key_column": {
+        "type": "string"
+      },
+      "watermark_column": {
+        "type": "string"
+      },
+      "target_table": {
+        "type": "string"
+      },
+      "parallel_copies": {
+        "type": "int",
+        "defaultValue": 1
+      },
+      "watermark_value": {
+        "type": "string",
+        "defaultValue": "1900-01-01T00:00:00.000"
+      },
+      "load_date": {
+        "type": "string"
+      },
+      "batch_id": {
+        "type": "string",
+        "defaultValue": "manual"
+      }
+    },
+    "variables": {
+      "folder_path": {
+        "type": "String"
+      }
+    },
+    "annotations": []
+  }
+}
