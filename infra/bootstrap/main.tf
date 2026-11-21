@@ -99,6 +99,14 @@ resource "azurerm_federated_identity_credential" "pull_request" {
   subject                   = "${local.github_subject}:pull_request"
 }
 
+resource "azurerm_federated_identity_credential" "dev_environment" {
+  name                      = "github-environment-dev"
+  user_assigned_identity_id = azurerm_user_assigned_identity.ci.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "${local.github_subject}:environment:dev"
+}
+
 resource "azurerm_role_assignment" "ci_contributor" {
   scope                            = azurerm_resource_group.main.id
   role_definition_name             = "Contributor"
